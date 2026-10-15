@@ -1,0 +1,27 @@
+# Dataset peserta: unduh hanya dari portal resmi, jangan commit!
+*.csv
+*.CSV
+*.xlsx
+*.xls
+*.tsv
+*.parquet
+*.feather
+*.rds
+*.RData
+*.rda
+
+# Lokasi umum penyimpanan dataset lokal
+/data/
+/dataset/
+/datasets/
+/raw_data/
+/data_raw/
+
+# Artefak lokal dan RStudio
+.Rhistory
+.RData
+.Rproj.user/
+.Renviron
+.env
+*_cache/
+*_files/

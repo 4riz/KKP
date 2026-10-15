@@ -1,0 +1,497 @@
+---
+title: "Dari Data menuju Informasi Strategis"
+subtitle: "Tata Kelola Data untuk Mendukung Pengambilan Keputusan di Sektor Kelautan dan Perikanan"
+author: "Akbar Rizki, S.Stat, M.Si"
+institute: "Sekolah Sains Data, Matematika dan Informatika - IPB University"
+date: "16 Oktober 2026"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    toc_float: yes
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+# Konfigurasi global R chunk
+knitr::opts_chunk$set(
+  echo = TRUE, 
+  warning = FALSE, 
+  message = FALSE, 
+  fig.width = 10, 
+  fig.height = 6,
+  fig.align = "center"
+)
+
+# Memuat paket yang diperlukan (Pastikan sudah di-install sebelumnya)
+# install.packages(c("tidyverse", "janitor", "knitr", "scales", "ggrepel", "DT"))
+library(tidyverse)
+library(janitor)
+library(knitr)
+library(scales)
+library(DT)
+```
+
+> **Akses dataset:** Materi ini menampilkan kode, tabel, dan grafik hasil analisis. **Dataset mentah tidak didistribusikan lewat GitHub.** Untuk mencoba sendiri, peserta perlu mengunduh dataset dari [Portal Satu Data KKP](https://portaldata.kkp.go.id/) (lihat juga [Tabel Dinamis Produksi Perikanan](https://portaldata.kkp.go.id/portals/data-statistik/prod-ikan/tbl-dinamis?filter_utama=1&tahun=2023)). Cocokkan periode, nama variabel, satuan, dan struktur file unduhan dengan contoh analisis.
+
+> **Menjalankan ulang:** Simpan data hasil unduhan di folder kerja lokal (tidak perlu diunggah ke GitHub) dan sesuaikan `file_path` serta argumen pembacaan file pada bagian **Proses Penyiapan Data**. File `KKP.html` di repository merupakan hasil analisis yang sudah disiapkan.
+
+## Executive Summary
+
+Paparan ini mendemonstrasikan bagaimana manajemen data yang terstruktur dapat mengubah *raw data* yang rentan anomali menjadi **Informasi Strategis** yang siap mendukung pengambilan keputusan di Kementerian Kelautan dan Perikanan (KKP). Seluruh proses—mulai dari entri, *coding*, hingga agregasi—diperagakan menggunakan bahasa pemrograman R.
+
+---
+
+## 1. Entry dan Coding Data
+
+### a. Proses Penyiapan Data
+Langkah pertama dalam manajemen data adalah membaca dan membersihkan struktur awal data agar seragam dan mudah diolah oleh sistem basis data maupun perangkat lunak analitik.
+
+```{r penyiapan_data}
+# 1. Membaca data asli (Tanpa clean_names)
+# Unduh data dari portal resmi KKP terlebih dahulu; simpan hanya pada komputer lokal.
+# Nama file berikut hanya CONTOH, ubah sesuai nama dan format file hasil unduhan.
+file_path <- "Produksi Perikanan Tangkap.csv"
+
+if (!file.exists(file_path)) {
+  stop(
+    "Dataset belum ditemukan. Silakan unduh secara mandiri dari https://portaldata.kkp.go.id/ ",
+    "lalu sesuaikan file_path dalam KKP.Rmd. Dataset tidak tersedia di repository GitHub."
+  )
+}
+
+# skip = 1 berlaku untuk struktur file yang dipakai dalam pelatihan;
+# sesuaikan bila format hasil unduhan di portal berbeda.
+data_raw <- read_csv(file_path, skip = 1)
+
+# 2. Menerapkan clean_names()
+data_tangkap <- data_raw %>% clean_names()
+
+# 3. Menyusun tabel perbandingan nama kolom
+compare <- tibble(
+  `Nama Kolom Asli (Raw CSV)` = names(data_raw),
+  `Hasil clean_names()` = names(data_tangkap)
+)
+
+# Menampilkan tabel perbandingan
+kable(compare, caption = "Tabel Perbandingan Transformasi Nama Kolom Data Produksi Perikanan Tangkap")
+```
+
+### b. Eksplorasi Peubah
+
+
+```{r skim_data}
+library(skimr)
+
+# Menampilkan ringkasan menyeluruh
+skim(data_tangkap)
+```
+
+
+
+### b. Proses Entri Data
+Entri data manual (tanpa sistem *dropdown*) berisiko menghasilkan ketidakkonsistenan penulisan. Berikut adalah cuplikan data hasil entri awal.
+
+```{r entri_data}
+data_tangkap %>% 
+  select(provinsi, kab_kota, jenis_ikan, volume_ton, nilai_rp_juta) %>% 
+  head(20) %>% 
+  kable(caption = "Tabel 1. Cuplikan Raw Data Produksi Perikanan")
+```
+
+### c. Proses Coding Data
+Untuk menjaga integritas data dan mempercepat pencarian basis data, kita perlu melakukan *coding* (membuat kodifikasi standar). Contohnya, mengubah variabel teks menjadi kode numerik.
+
+```{r coding_data}
+data_tangkap <- data_tangkap %>%
+  mutate(
+    kode_usaha = case_when(
+      str_detect(toupper(jenis_usaha), "LAUT") ~ 10,
+      str_detect(toupper(jenis_usaha), "DARATAN|PUD") ~ 20,
+      TRUE ~ 99
+    )
+  )
+
+data_tangkap %>% 
+  select(jenis_usaha, kode_usaha) %>% 
+  distinct() %>% 
+  kable(caption = "Tabel 2. Hasil Master Data Coding Jenis Usaha")
+```
+
+---
+
+## 2. Bekerja dengan Satu Tabel Data
+
+Proses manajemen data beralih ke ekstraksi informasi spesifik melalui pemfilteran dan agregasi.
+
+### a. Pemfilteran pada Satu Peubah
+Pimpinan meminta laporan data produksi khusus wilayah **DKI JAKARTA**.
+
+```{r filter_satu}
+data_dki <- data_tangkap %>% 
+  filter(provinsi == "DKI JAKARTA")
+
+data_dki %>% 
+  select(kab_kota, kelompok_ikan, volume_ton) %>% 
+  head(5) %>% 
+  kable()
+```
+
+### b. Pemfilteran pada Dua Peubah
+Mencari data yang lebih sempit: Produksi **"CAKALANG"** di **SULAWESI UTARA**.
+
+```{r filter_dua}
+data_spesifik <- data_tangkap %>% 
+  filter(provinsi == "SULAWESI UTARA", kelompok_ikan == "CAKALANG")
+
+data_spesifik %>% 
+  select(kab_kota, jenis_ikan, volume_ton) %>% 
+  kable()
+```
+
+### c. Agregasi Data
+Mengubah baris transaksi menjadi ringkasan level provinsi untuk presentasi pimpinan.
+
+```{r agregasi}
+rekap_provinsi <- data_tangkap %>%
+  group_by(provinsi) %>%
+  summarise(
+    total_volume_ton = sum(volume_ton, na.rm = TRUE),
+    total_nilai_juta = sum(nilai_rp_juta, na.rm = TRUE)
+  ) %>%
+  arrange(desc(total_nilai_juta))
+
+# Menampilkan menggunakan Datatable agar interaktif
+datatable(rekap_provinsi, options = list(pageLength = 10)) %>% 
+  formatCurrency('total_nilai_juta', currency = 'Rp ', interval = 3, mark = '.', dec.mark = ',') %>% 
+  formatRound('total_volume_ton', digits = 2)
+```
+
+---
+
+## 3. Bekerja dengan Lebih dari Satu Tabel Data
+
+Data KKP sering kali terdistribusi di beberapa unit eselon. Kita harus mampu merajutnya (*merging*).
+
+```{r siapkan_tabel_simulasi}
+# Menyiapkan simulasi subset tabel untuk didemonstrasikan
+tabel_volume <- data_tangkap %>% select(provinsi, kab_kota, jenis_ikan, volume_ton) %>% head(3)
+tabel_nilai <- data_tangkap %>% select(provinsi, kab_kota, jenis_ikan, nilai_rp_juta) %>% head(3)
+
+data_jawa_tengah <- data_tangkap %>% filter(provinsi == "JAWA TENGAH") %>% head(2)
+data_papua <- data_tangkap %>% filter(provinsi == "PAPUA") %>% head(2)
+```
+
+```{r}
+tabel_volume %>% kable()
+tabel_nilai %>% kable()
+```
+
+
+```{r}
+data_jawa_tengah %>% kable()
+data_papua %>% kable()
+```
+
+
+### a. Menggabungkan Data Baru (Merging in New Cases)
+Menyatukan file laporan mingguan dari wilayah Jawa Tengah dan Papua (menambah baris ke bawah / *Row Bind*).
+
+```{r merge_cases}
+data_gabung_baris <- bind_rows(data_jawa_tengah, data_papua)
+
+data_gabung_baris %>% 
+  select(provinsi, kab_kota, jenis_ikan, volume_ton) %>% 
+  kable()
+```
+
+### b. Menggabungkan Peubah Baru (Merging in New Variables)
+Menyatukan tabel yang berisi *Volume* dari Ditjen Tangkap dengan tabel *Nilai* dari Ditjen PDSKP berdasarkan "Kunci Wilayah dan Ikan" (*Column Join*).
+
+```{r merge_vars}
+data_gabung_kolom <- left_join(tabel_volume, tabel_nilai, 
+                               by = c("provinsi", "kab_kota", "jenis_ikan"))
+
+data_gabung_kolom %>% kable()
+```
+
+### c. Menggabungkan Data
+Memperkaya tabel utama dengan informasi "Zona Waktu" menggunakan tabel master/referensi
+
+```{r master_time}
+# Membuat Master Data (Tabel Lookup)
+tabel_master_wilayah <- tibble(
+  provinsi = c("DKI JAKARTA", "JAWA TENGAH", "SULAWESI UTARA", "MALUKU", "PAPUA"),
+  regional_waktu = c("WIB", "WIB", "WITA", "WIT", "WIT")
+)
+
+tabel_master_wilayah %>% kable()
+```
+
+
+```{r lookups}
+# Left Join
+data_dengan_regional <- data_gabung_baris %>%
+  select(provinsi, jenis_ikan, volume_ton) %>%
+  left_join(tabel_master_wilayah, by = "provinsi")
+
+data_dengan_regional %>% kable()
+```
+
+---
+
+## 4. Anomaly Database
+
+Jika Portal Data KKP menggunakan arsitektur file datar (*Flat File* seperti Excel) dan menolak konsep **Normalisasi Relasional**, data akan rentan terhadap 3 penyakit anomali utama:
+
+1. **Anomali Penyisipan (*Insertion Anomaly*):**
+   Tidak bisa menginput master "Pelabuhan Perikanan Baru" jika belum ada kapal nelayan yang melakukan bongkar muat dan tercatat di sistem pada pelabuhan tersebut.
+
+2. **Anomali Peremajaan (*Update Anomaly*):**
+   Jika nama "CUMI-CUMI" diubah aturannya menjadi "MOLUSKA UTAMA", admin harus mencari dan meng-*update* ratusan ribu baris data.
+```{r update_anomaly, eval=FALSE}
+# Ilustrasi kerentanan update pada flat file
+# Jika satu baris terlewat karena salah ejaan (misal: "cumi - cumi"), maka rekap data nasional menjadi tidak valid.
+data_rentan <- data_tangkap %>%
+  mutate(kelompok_ikan = ifelse(provinsi == "DKI JAKARTA" & kelompok_ikan == "CUMI-CUMI", 
+                                "MOLUSKA UTAMA", kelompok_ikan))
+```
+
+3. **Anomali Penghapusan (*Deletion Anomaly*):**
+   Menghapus satu baris laporan transaksi perikanan di wilayah pulau terluar berpotensi menghapus seluruh jejak nama pulau tersebut dari sistem informasi KKP.
+
+---
+
+## 5. Dashboard Informasi Strategis
+
+Tujuan paripurna dari Manajemen Data adalah melahirkan pandangan strategis (*Strategic Insight*). Melalui grafik di bawah ini, pimpinan KKP dapat langsung melihat **Komoditas Kuadran Atas** (Kinerja Volume vs Nilai) untuk prioritas kebijakan Rencana Kerja Pemerintah (RKP) maupun penggenjotan PNBP.
+
+```{r info_strategis, fig.cap="Kuadran Strategis Komoditas Kelautan dan Perikanan (Nilai vs Volume)"}
+# Menyiapkan data agregat komoditas
+komoditas_strategis <- data_tangkap %>%
+  group_by(kelompok_ikan) %>%
+  summarise(
+    total_volume = sum(volume_ton, na.rm = TRUE),
+    total_nilai = sum(nilai_rp_juta, na.rm = TRUE)
+  )
+
+# Memastikan ggrepel tersedia sebelum plotting
+if (requireNamespace("ggrepel", quietly = TRUE)) {
+  
+  ggplot(komoditas_strategis, aes(x = total_volume, y = total_nilai, label = kelompok_ikan)) +
+    geom_point(color = "#005b96", size = 5, alpha = 0.8) +
+    ggrepel::geom_text_repel(size = 4, fontface = "bold", box.padding = 0.6) +
+    scale_x_continuous(labels = comma_format()) +
+    scale_y_continuous(labels = comma_format()) +
+    labs(
+      title = "Pemetaan Strategis Komoditas Perikanan Tangkap",
+      subtitle = "Perbandingan Total Volume (Ton) terhadap Nilai Ekonomi (Juta Rp)",
+      x = "Total Volume Tangkapan (Ton)",
+      y = "Total Nilai Ekonomi (Juta Rupiah)",
+      caption = "Sumber: Portal Data KKP"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold", color = "#2c3e50"),
+      plot.subtitle = element_text(color = "#7f8c8d", margin = margin(b = 15)),
+      axis.title = element_text(face = "bold")
+    )
+  
+} else {
+  print("Harap install package 'ggrepel' untuk melihat visualisasi yang interaktif.")
+}
+```
+
+###  1. Lollipop Chart: Analisis Nilai Tambah Komoditas (Unit Value / Harga per Kg)
+Informasi Strategis: Menunjukkan komoditas mana yang memiliki Unit Value (Rupiah per Kg) tertinggi. Komoditas ber-Unit Value tinggi tidak memerlukan volume tangkapan masif untuk menghasilkan nilai ekonomi tinggi, sehingga sangat relevan untuk kebijakan Penangkapan Ikan Terukur (PIT) dan proteksi spesies bernilai tinggi dari eksploitasi berlebihan (overfishing).
+
+```{r chart_unit_value, fig.width=10, fig.height=6}
+# Menghitung Nilai Tambah Ekonomi (Rp/Kg) per Komoditas
+harga_komoditas <- data_tangkap %>%
+  group_by(kelompok_ikan) %>%
+  summarise(
+    total_volume = sum(volume_ton, na.rm = TRUE),
+    total_nilai_juta = sum(nilai_rp_juta, na.rm = TRUE),
+    harga_per_kg = (total_nilai_juta * 1000) / total_volume, # Konversi ke Rp/Kg
+    .groups = "drop"
+  ) %>%
+  filter(total_volume > 500) %>% # Memfilter komoditas berskala signifikan
+  arrange(desc(harga_per_kg)) %>%
+  head(10)
+
+# Visualisasi Lollipop Chart
+ggplot(harga_komoditas, aes(x = reorder(kelompok_ikan, harga_per_kg), y = harga_per_kg)) +
+  geom_segment(aes(xend = kelompok_ikan, yend = 0), color = "#0288d1", linewidth = 1.2) +
+  geom_point(color = "#01579b", size = 5) +
+  geom_text(aes(label = paste0("Rp ", comma(round(harga_per_kg)))), 
+            hjust = -0.15, size = 3.8, fontface = "bold") +
+  coord_flip() +
+  scale_y_continuous(labels = comma_format(prefix = "Rp "), expand = expansion(mult = c(0, 0.25))) +
+  labs(
+    title = "Top 10 Komoditas Perikanan Ber-Nilai Tambah Tinggi (Rp/Kg)",
+    subtitle = "Indikator Komoditas High-Value untuk Kebijakan Efisiensi Tangkapan & Proteksi",
+    x = "Kelompok Ikan",
+    y = "Harga Rata-Rata (Rp / Kg)",
+    caption = "Sumber Data: Portal Data KKP"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, color = "#01579b"),
+    panel.grid.major.y = element_blank(),
+    axis.title = element_text(face = "bold")
+  )
+
+```
+
+### 2. *Heatmap Matrix*: Pemetaan Sentra Produksi & Komoditas Unggulan Wilayah
+* **Informasi Strategis:** Mengidentifikasi konsentrasi produksi secara spasial (Provinsi x Komoditas). Pimpinan KKP dapat melihat secara visual *hub* utama (misalnya: Maluku/Sulut unggul di Tuna & Cakalang, DKI/Jateng di Cumi & Layang, Riau di Kerang) untuk penentuan alokasi infrastruktur seperti *Cold Storage*, Pelabuhan Perikanan, dan bantuan armada kapal.
+
+
+```{r chart_heatmap_sentra, fig.width=10, fig.height=6}
+# Mengambil Top 6 Provinsi & Top 6 Komoditas Terbesar
+top_prov <- data_tangkap %>% 
+  group_by(provinsi) %>% 
+  summarise(vol = sum(volume_ton, na.rm = TRUE)) %>% 
+  slice_max(vol, n = 6) %>% pull(provinsi)
+
+top_ikan <- data_tangkap %>% 
+  group_by(kelompok_ikan) %>% 
+  summarise(vol = sum(volume_ton, na.rm = TRUE)) %>% 
+  slice_max(vol, n = 6) %>% pull(kelompok_ikan)
+
+matriks_produksi <- data_tangkap %>%
+  filter(provinsi %in% top_prov, kelompok_ikan %in% top_ikan) %>%
+  group_by(provinsi, kelompok_ikan) %>%
+  summarise(total_volume = sum(volume_ton, na.rm = TRUE), .groups = "drop")
+
+# Visualisasi Heatmap
+ggplot(matriks_produksi, aes(x = kelompok_ikan, y = provinsi, fill = total_volume)) +
+  geom_tile(color = "white", linewidth = 1) +
+  geom_text(aes(label = comma(round(total_volume))), color = "white", fontface = "bold", size = 3.5) +
+  scale_fill_gradient(low = "#81d4fa", high = "#01579b", labels = comma_format(suffix = " Ton")) +
+  labs(
+    title = "Matriks Sentra Produksi Perikanan Utama KKP",
+    subtitle = "Pemetaan Konsentrasi Volume Tangkapan (Ton) Antar Wilayah dan Komoditas Utama",
+    x = "Kelompok Ikan Utama",
+    y = "Provinsi",
+    fill = "Volume (Ton)",
+    caption = "Sumber Data: Portal Data KKP"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, color = "#01579b"),
+    axis.text.x = element_text(angle = 25, hjust = 1, face = "bold"),
+    axis.text.y = element_text(face = "bold")
+  )
+  
+```
+
+
+
+### 3. *100% Stacked Bar Chart*: Disparitas Sumber Daya (Perikanan Laut vs. Perairan Umum Daratan / PUD)
+* **Informasi Strategis:** Memetakan proporsi ketergantungan wilayah terhadap hasil Laut vs Perairan Umum Daratan (danau, sungai, waduk). Ini memberi sinyal strategis bagi Direktorat Jenderal terkait untuk menyeimbangkan program konservasi perairan pedalaman (*restocking* benih) vs modernisasi nelayan tangkap laut.
+
+
+```{r chart_disparitas_pud, fig.width=10, fig.height=6}
+# 1. Rekapitulasi Proporsi dan Perhitungan Persentase Laut per Provinsi
+prop_pud <- data_tangkap %>%
+  # Mengelompokkan berdasarkan Provinsi dan Jenis Usaha
+  group_by(provinsi, jenis_usaha) %>%
+  summarise(total_volume = sum(volume_ton, na.rm = TRUE), .groups = "drop") %>%
+  # Memfilter Provinsi yang volumenya sangat kecil agar grafik tidak terlalu padat
+  group_by(provinsi) %>%
+  filter(sum(total_volume) > 5000) %>% 
+  # Menghitung Persentase Laut untuk digunakan sebagai pengurut (sorting)
+  mutate(
+    persentase_laut = ifelse(jenis_usaha == "LAUT", 
+                             total_volume / sum(total_volume), 
+                             0)
+  ) %>%
+  # Mengambil nilai persentase_laut terbesar untuk disematkan ke nama provinsi
+  mutate(sort_value = max(persentase_laut)) %>% 
+  ungroup()
+
+# 2. Visualisasi Stacked Bar 100% yang Terurut
+ggplot(prop_pud, aes(x = reorder(provinsi, sort_value), y = total_volume, fill = jenis_usaha)) +
+  geom_col(position = "fill", width = 0.7) +
+  scale_y_continuous(labels = percent_format()) +
+  # Memilih warna kontras yang representatif (Biru Laut & Hijau Darat)
+  scale_fill_manual(values = c("LAUT" = "#0288d1", "PERAIRAN UMUM DARATAN" = "#66bb6a")) +
+  coord_flip() +
+  labs(
+    title = "Disparitas Ekosistem: Ketergantungan Wilayah (Laut vs Daratan)",
+    subtitle = "Diurutkan dari Provinsi dengan Dominasi Produksi Laut Tertinggi ke Terendah",
+    x = "Provinsi",
+    y = "Persentase Proporsi Produksi (%)",
+    fill = "Jenis Perairan",
+    caption = "Sumber Data: Portal Data KKP"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, color = "#01579b"),
+    legend.position = "top",
+    axis.text.y = element_text(face = "bold", size = 9), # Mempertegas nama provinsi
+    axis.title = element_text(face = "bold")
+  )
+```
+
+
+### 4. *Kurva Pareto (Dual-Axis Chart)*: Aturan 80/20 Kontribusi Nilai Ekonomi Komoditas
+* **Informasi Strategis:** Mengidentifikasi bahwa sebagian kecil komoditas (sekitar 20% "vital few") menyumbang lebih dari 80% total nilai ekonomi nasional. Informasi ini menjadi landasan agar KKP memprioritaskan tata kelola data, standardisasi, dan pengawasan kuota pada komoditas kunci tersebut terlebih dahulu.
+
+
+```{r chart_pareto, fig.width=10, fig.height=6}
+# 1. Menyiapkan Data Pareto dengan Konversi Miliar Rp yang Aman
+pareto_data <- data_tangkap %>%
+  mutate(nilai_rp_juta = as.numeric(nilai_rp_juta)) %>% # Memastikan tipe data numerik
+  group_by(kelompok_ikan) %>%
+  summarise(
+    total_nilai_miliar = sum(nilai_rp_juta, na.rm = TRUE) / 1000, # Langsung konversi ke Miliar Rp
+    .groups = "drop"
+  ) %>%
+  arrange(desc(total_nilai_miliar)) %>%
+  mutate(
+    persen_kumulatif = cumsum(total_nilai_miliar) / sum(total_nilai_miliar) * 100,
+    peringkat = row_number()
+  ) %>%
+  filter(peringkat <= 10)
+
+# 2. Mengambil Nilai Maksimum secara Aman
+max_nilai_miliar <- max(pareto_data$total_nilai_miliar, na.rm = TRUE)
+
+# 3. Visualisasi Kurva Pareto Dual-Axis
+ggplot(pareto_data, aes(x = reorder(kelompok_ikan, -total_nilai_miliar))) +
+  geom_col(aes(y = total_nilai_miliar), fill = "#0288d1", width = 0.55) +
+  geom_line(aes(y = persen_kumulatif * max_nilai_miliar / 100, group = 1), color = "#d32f2f", linewidth = 1.2) +
+  geom_point(aes(y = persen_kumulatif * max_nilai_miliar / 100), color = "#d32f2f", size = 3) +
+  geom_hline(yintercept = 80 * max_nilai_miliar / 100, linetype = "dashed", color = "#d32f2f", linewidth = 0.8) +
+  scale_y_continuous(
+    name = "Total Nilai Ekonomi (Miliar Rp)",
+    labels = comma_format(),
+    sec.axis = sec_axis(~ . / max_nilai_miliar * 100, 
+                         name = "Kumulatif Kontribusi (%)", 
+                         labels = function(x) paste0(round(x), "%"))
+  ) +
+  labs(
+    title = "Analisis Pareto: Kontribusi Nilai Ekonomi Komoditas Perikanan",
+    subtitle = "Garis Merah Menunjukkan Kontribusi Kumulatif (Fokus Pengawasan pada Komoditas 80% Pertama)",
+    x = "Kelompok Ikan",
+    caption = "Sumber Data: Portal Data KKP"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, color = "#01579b"),
+    axis.text.x = element_text(angle = 30, hjust = 1, face = "bold"),
+    axis.title.y.right = element_text(color = "#d32f2f", face = "bold"),
+    axis.title.y.left = element_text(color = "#0288d1", face = "bold")
+  )
+```
+
+### Ringkasan Strategis :
+
+| Jenis Grafik | Pertanyaan Eksekutif yang Dijawab | Contoh Rekomendasi Kebijakan KP |
+| :--- | :--- | :--- |
+| **Scatter (Vol vs Nilai)** | Mana komoditas *High-Volume* vs *High-Value*? | Penentuan Kuota PIT & Pembagian Zona Pelabuhan |
+| **Lollipop (Rp/Kg)** | Komoditas mana yang paling menguntungkan per kilogram? | Insentif Usaha & Pengawasan Kelestarian Spesies |
+| **Heatmap Matrix** | Di mana lokasi pusat produksi komoditas tertentu? | Alokasi Bantuan Armada, Es/Cold Storage, & Logistik |
+| **Stacked Bar (%)** | Seberapa besar ketergantungan wilayah pada PUD vs Laut? | Program Restocking Danau/Sungai vs Nelayan Tangkap |
+| **Pareto Chart** | Komoditas mana yang menyumbang 80% ekonomi KP? | Prioritas Modernisasi Sistem Pendataan (Satu Data) |
